@@ -1,32 +1,33 @@
-name: Aurora Pipeline – Full Data Scrape
+name: Aurora Pipeline – PR-based Data Updates
 
 on:
   schedule:
     - cron: '0 1 * * *'   # daily at 01:00 UTC
   workflow_dispatch:       # manual Run workflow button
 
-# Grant the token the ability to push (if repo settings allow)
+# Token scopes for PR-based updates
 permissions:
   contents: write
-  actions: read
-  checks: read
   pull-requests: write
 
 jobs:
-  scrape-all:
+  scrape-and-pr:
     runs-on: ubuntu-latest
 
     steps:
+      # 1) Checkout
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           persist-credentials: true
           fetch-depth: 0
 
+      # 2) Prep folders
       - name: Prepare folders
         run: |
           mkdir -p data/input data/coa data/procurement data/comelec data/courts data/dbm saln_meta tools
 
+      # 3) R setup + deps
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
 
@@ -54,6 +55,7 @@ jobs:
             R/court_cases.R
             R/dbm_releases.R
 
+      # 4) Python setup (risk emitter)
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -64,7 +66,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pydantic
 
-      # ---------- RUN SCRAPERS ----------
+      # 5) Run all scrapers
       - name: Run legislator scraper (House + Senate)
         run: Rscript R/fetch_ph_legislators.R
 
@@ -89,7 +91,7 @@ jobs:
       - name: Run DBM releases normalizer
         run: Rscript R/dbm_releases.R
 
-      # ---------- POST RISK EVENTS ----------
+      # 6) Emit risk events (safe if API secrets aren't set)
       - name: Emit risk events to Aurora
         env:
           AURORA_API_URL: ${{ secrets.AURORA_API_URL }}
@@ -97,20 +99,8 @@ jobs:
         run: |
           python tools/emit_risk.py || echo "[emit_risk] skipping (no API configured)"
 
-      # ---------- COMMIT OUTPUTS ----------
-      - name: Commit data (attempt direct push)
-        id: commit_data
-        continue-on-error: true
-        run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "github-actions"
-          git add data/*.csv data/*/*.csv saln_meta/*.json 2>/dev/null || true
-          git commit -m "[auto] Update data (Legislators/SALN/PNP/COA/PhilGEPS/COMELEC/Courts/DBM)" || echo "No changes to commit"
-          git push
-
-      # ---------- FALLBACK: OPEN A PR IF PUSH FAILED (e.g., forks) ----------
-      - name: Create pull request with data updates (fallback)
-        if: failure() && steps.commit_data.outcome == 'failure'
+      # 7) Create/refresh a PR with updated data (no direct push required)
+      - name: Create pull request with data updates
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -125,7 +115,7 @@ jobs:
             data/**
             saln_meta/**
 
-      # Debug info on failure
+      # 8) Debug info on failure
       - name: Session info on failure
         if: failure()
         run: |
