@@ -1,53 +1,15 @@
-name: Auto Scrape Legislators, SALN, and PNP
+nm <- names(df)
+name_col <- if ("name" %in% nm) "name" else nm[1]
+party_col <- if ("party" %in% nm) "party" else if ("political_party" %in% nm) "political_party" else NA_character_
+dist_col  <- if ("district" %in% nm) "district" else if ("district_info" %in% nm) "district_info" else NA_character_
 
-on:
-  schedule:
-    - cron: '0 1 * * *'   # daily at 01:00 UTC
-  workflow_dispatch:
-
-jobs:
-  scrape-all:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up R
-        uses: r-lib/actions/setup-r@v2
-
-      # This installs CRAN packages + needed system libraries and caches them
-      - name: Install R dependencies
-        uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: |
-            any::rvest
-            any::dplyr
-            any::stringr
-            any::janitor
-            any::readr
-            any::purrr
-            any::jsonlite
-          needs: |
-            R/fetch_ph_legislators.R
-            R/fetch_saln_metadata.R
-            R/fetch_pnp_data.R
-
-      # --- Run your scrapers ---
-      - name: Run legislator scraper
-        run: Rscript R/fetch_ph_legislators.R
-
-      - name: Run SALN metadata generator
-        run: Rscript R/fetch_saln_metadata.R
-
-      - name: Run PNP scraper
-        run: Rscript R/fetch_pnp_data.R
-
-      # --- Commit outputs (CSV/JSON) for auditability ---
-      - name: Commit & push data
-        run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "github-actions"
-          git add data/*.csv data/pnp/*.csv saln_meta/*.json 2>/dev/null || true
-          git commit -m "[auto] Update data (legislators/SALN/PNP)" || echo "No changes to commit"
-          git push
+df |>
+  tibble::tibble(
+    name          = stringr::str_squish(as.character(df[[name_col]])),
+    party         = if (!is.na(party_col)) stringr::str_squish(as.character(df[[party_col]])) else NA_character_,
+    district_info = if (!is.na(dist_col))  stringr::str_squish(as.character(df[[dist_col]]))  else NA_character_,
+    chamber       = "house",
+    source        = "wikipedia",
+    official_profile_url = NA_character_,
+    last_updated  = Sys.Date()
+  )
