@@ -2,7 +2,8 @@ name: Auto SALN Metadata
 
 on:
   schedule:
-    - cron: '0 1 * * 1'  # Every Monday at 01:00 UTC (after scraping)
+    - cron: cron: '0 1 * * *'  # Every day at 01:00 UTC
+
   workflow_dispatch:
 
 jobs:
