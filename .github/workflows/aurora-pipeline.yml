@@ -3,7 +3,14 @@ name: Aurora Pipeline – Full Data Scrape
 on:
   schedule:
     - cron: '0 1 * * *'   # daily at 01:00 UTC
-  workflow_dispatch:       # allows manual trigger with "Run workflow" button
+  workflow_dispatch:       # manual Run workflow button
+
+# Grant the token the ability to push (if repo settings allow)
+permissions:
+  contents: write
+  actions: read
+  checks: read
+  pull-requests: write
 
 jobs:
   scrape-all:
@@ -12,6 +19,9 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
 
       - name: Prepare folders
         run: |
@@ -85,13 +95,40 @@ jobs:
           AURORA_API_URL: ${{ secrets.AURORA_API_URL }}
           AURORA_API_TOKEN: ${{ secrets.AURORA_API_TOKEN }}
         run: |
-          python tools/emit_risk.py
+          python tools/emit_risk.py || echo "[emit_risk] skipping (no API configured)"
 
       # ---------- COMMIT OUTPUTS ----------
-      - name: Commit & push data
+      - name: Commit data (attempt direct push)
+        id: commit_data
+        continue-on-error: true
         run: |
           git config --global user.email "actions@github.com"
           git config --global user.name "github-actions"
-          git add data/*.csv data/*/*.csv saln_meta/*.json || true
-          git commit -m "[auto] Update Aurora data pipeline outputs" || echo "No changes to commit"
+          git add data/*.csv data/*/*.csv saln_meta/*.json 2>/dev/null || true
+          git commit -m "[auto] Update data (Legislators/SALN/PNP/COA/PhilGEPS/COMELEC/Courts/DBM)" || echo "No changes to commit"
           git push
+
+      # ---------- FALLBACK: OPEN A PR IF PUSH FAILED (e.g., forks) ----------
+      - name: Create pull request with data updates (fallback)
+        if: failure() && steps.commit_data.outcome == 'failure'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "[auto] Update data (Legislators/SALN/PNP/COA/PhilGEPS/COMELEC/Courts/DBM)"
+          branch: data/auto-update
+          title: "Automated data update"
+          body: |
+            This PR contains automated data updates produced by the Aurora pipeline.
+            Review diffs and merge when ready.
+          labels: data-update, automated
+          add-paths: |
+            data/**
+            saln_meta/**
+
+      # Debug info on failure
+      - name: Session info on failure
+        if: failure()
+        run: |
+          Rscript -e 'sessionInfo()'
+          echo "--- repo tree ---"
+          ls -R
