@@ -2,7 +2,7 @@ name: Auto Scrape Legislators, SALN, and PNP
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # every day at 01:00 UTC
+    - cron: '0 1 * * *'   # daily at 01:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -16,41 +16,38 @@ jobs:
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
 
-      - name: Install R packages
-        run: |
-          Rscript -e 'install.packages(c("rvest","dplyr","stringr","janitor","readr","purrr","jsonlite"))'
+      # This installs CRAN packages + needed system libraries and caches them
+      - name: Install R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::rvest
+            any::dplyr
+            any::stringr
+            any::janitor
+            any::readr
+            any::purrr
+            any::jsonlite
+          needs: |
+            R/fetch_ph_legislators.R
+            R/fetch_saln_metadata.R
+            R/fetch_pnp_data.R
 
-      # --- Legislators ---
+      # --- Run your scrapers ---
       - name: Run legislator scraper
-        run: |
-          Rscript R/fetch_ph_legislators.R
+        run: Rscript R/fetch_ph_legislators.R
 
-      - name: Commit legislator data
+      - name: Run SALN metadata generator
+        run: Rscript R/fetch_saln_metadata.R
+
+      - name: Run PNP scraper
+        run: Rscript R/fetch_pnp_data.R
+
+      # --- Commit outputs (CSV/JSON) for auditability ---
+      - name: Commit & push data
         run: |
           git config --global user.email "actions@github.com"
           git config --global user.name "github-actions"
-          git add data/philippines_*.csv
-          git commit -m "[auto] Update legislator data" || echo "No legislator changes to commit"
-          git push
-
-      # --- SALN Metadata ---
-      - name: Run SALN metadata generator
-        run: |
-          Rscript R/fetch_saln_metadata.R
-
-      - name: Commit SALN metadata
-        run: |
-          git add saln_meta/*.json
-          git commit -m "[auto] Update SALN metadata" || echo "No SALN changes to commit"
-          git push
-
-      # --- PNP Data ---
-      - name: Run PNP scraper
-        run: |
-          Rscript R/fetch_pnp_data.R
-
-      - name: Commit PNP data
-        run: |
-          git add data/pnp/*.csv
-          git commit -m "[auto] Update PNP data" || echo "No PNP changes to commit"
+          git add data/*.csv data/pnp/*.csv saln_meta/*.json 2>/dev/null || true
+          git commit -m "[auto] Update data (legislators/SALN/PNP)" || echo "No changes to commit"
           git push
