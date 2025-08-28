@@ -1,10 +1,11 @@
-name: Aurora Pipeline – PR-based Data Updates
+name: Aurora Pipeline – PR-based Data Updates (Foolproof)
 
 on:
   schedule:
     - cron: '0 1 * * *'   # daily at 01:00 UTC
   workflow_dispatch:       # manual Run workflow button
 
+# Allow PR creation / commits on a branch with the GITHUB_TOKEN
 permissions:
   contents: write
   pull-requests: write
@@ -14,19 +15,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout
+      # 1) Checkout (keeps token for PR creation)
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           persist-credentials: true
           fetch-depth: 0
 
-      # 2) Prepare folders
+      # 2) Prepare folders so writers never fail on missing dirs
       - name: Prepare folders
         run: |
           mkdir -p data/input data/coa data/procurement data/comelec data/courts data/dbm saln_meta tools
 
-      # 3) R setup + dependencies (auto-installs system libs, caches CRAN pkgs)
+      # 3) R setup + deps (auto-installs system libs; caches CRAN pkgs)
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
 
@@ -44,17 +45,8 @@ jobs:
             any::digest
             any::httr
             any::lubridate
-          needs: |
-            R/fetch_ph_legislators.R
-            R/fetch_saln_metadata.R
-            R/fetch_pnp_data.R
-            R/coa_findings.R
-            R/philgeps_awards.R
-            R/comelec_soce.R
-            R/court_cases.R
-            R/dbm_releases.R
 
-      # 4) Python setup (risk emitter)
+      # 4) Python setup (for risk emitter)
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -65,40 +57,49 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pydantic
 
-      # 5) Run all scrapers / normalizers
-      - name: Run legislator scraper (House + Senate)
+      # 5) Run all scrapers / normalizers (do not fail the whole job)
+      - name: Legislators (House + Senate)
         run: Rscript R/fetch_ph_legislators.R
+        continue-on-error: true
 
-      - name: Build SALN metadata
+      - name: SALN metadata
         run: Rscript R/fetch_saln_metadata.R
+        continue-on-error: true
 
-      - name: Run PNP scraper
+      - name: PNP
         run: Rscript R/fetch_pnp_data.R
+        continue-on-error: true
 
-      - name: Run COA findings scraper
+      - name: COA findings
         run: Rscript R/coa_findings.R
+        continue-on-error: true
 
-      - name: Run PhilGEPS awards normalizer
+      - name: PhilGEPS awards
         run: Rscript R/philgeps_awards.R
+        continue-on-error: true
 
-      - name: Run COMELEC SOCE normalizer
+      - name: COMELEC SOCE
         run: Rscript R/comelec_soce.R
+        continue-on-error: true
 
-      - name: Run Courts case extractor
+      - name: Courts (Ombudsman / SB / SC / CA)
         run: Rscript R/court_cases.R
+        continue-on-error: true
 
-      - name: Run DBM releases normalizer
+      - name: DBM releases
         run: Rscript R/dbm_releases.R
+        continue-on-error: true
 
-      # 6) Emit risk events (safe if API secrets aren't set)
+      # 6) Emit risk events (safe to skip if not configured)
       - name: Emit risk events to Aurora
         env:
           AURORA_API_URL: ${{ secrets.AURORA_API_URL }}
           AURORA_API_TOKEN: ${{ secrets.AURORA_API_TOKEN }}
         run: |
           python tools/emit_risk.py || echo "[emit_risk] skipping (no API configured)"
+        continue-on-error: true
 
-      # 7) Open/refresh a PR with updated data (no direct push)
+      # 7) Create / refresh a PR with updated data (no direct push anywhere)
       - name: Create pull request with data updates
         uses: peter-evans/create-pull-request@v6
         with:
@@ -114,10 +115,10 @@ jobs:
             data/**
             saln_meta/**
 
-      # 8) Debug info on failure
+      # 8) Minimal debug info if anything still errors
       - name: Session info on failure
         if: failure()
         run: |
-          Rscript -e 'sessionInfo()'
+          Rscript -e 'sessionInfo()' || true
           echo "--- repo tree ---"
-          ls -R
+          ls -R || true
