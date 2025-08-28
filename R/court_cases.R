@@ -13,6 +13,7 @@ library(purrr)
 
 dir.create("data/courts", recursive = TRUE, showWarnings = FALSE)
 
+# TODO: put the actual public listing URLs you want here
 COURT_INDEXES <- tibble::tibble(
   court = c(
     # "Ombudsman", "Sandiganbayan", "SC", "CA"
@@ -47,9 +48,9 @@ extract_cases <- function(court, index_url) {
     filter(!is.na(url)) |>
     mutate(url = ifelse(startsWith(url, "/"), paste0(index_url, url), url)) |>
     distinct(url, .keep_all = TRUE) |>
-    filter(grepl("\\.pdf($|\\?)", url, ignore.case = TRUE) | grepl("case|decision|resolution|docket|g.r.|crim|admin", text, ignore.case = TRUE))
+    filter(grepl("\\.pdf($|\\?)", url, ignore.case = TRUE) |
+           grepl("case|decision|resolution|docket|g.r.|crim|admin", text, ignore.case = TRUE))
 
-  # heuristics for metadata
   tibble(
     case_event_id = paste0("case-", digest(url, algo = "sha256")),
     court = court,
