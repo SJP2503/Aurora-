@@ -1,11 +1,10 @@
-name: Aurora Pipeline – PR-based Data Updates (Foolproof)
+name: Aurora Pipeline – PR-based Data Updates (Hardened)
 
 on:
   schedule:
     - cron: '0 1 * * *'   # daily at 01:00 UTC
-  workflow_dispatch:       # manual Run workflow button
+  workflow_dispatch:
 
-# Allow PR creation / commits on a branch with the GITHUB_TOKEN
 permissions:
   contents: write
   pull-requests: write
@@ -15,19 +14,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout (keeps token for PR creation)
+      # 0) Git + repo hygiene (prevents exit 128 from "dubious ownership")
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           persist-credentials: true
           fetch-depth: 0
 
-      # 2) Prepare folders so writers never fail on missing dirs
+      - name: Configure git for Actions
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions"
+
       - name: Prepare folders
         run: |
           mkdir -p data/input data/coa data/procurement data/comelec data/courts data/dbm saln_meta tools
 
-      # 3) R setup + deps (auto-installs system libs; caches CRAN pkgs)
+      # R runtime + deps
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
 
@@ -46,7 +50,7 @@ jobs:
             any::httr
             any::lubridate
 
-      # 4) Python setup (for risk emitter)
+      # Python for risk emitter
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -57,7 +61,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pydantic
 
-      # 5) Run all scrapers / normalizers (do not fail the whole job)
+      # ---- Scrapers / normalizers (best-effort; don't kill the run) ----
       - name: Legislators (House + Senate)
         run: Rscript R/fetch_ph_legislators.R
         continue-on-error: true
@@ -90,7 +94,7 @@ jobs:
         run: Rscript R/dbm_releases.R
         continue-on-error: true
 
-      # 6) Emit risk events (safe to skip if not configured)
+      # Risk feed (safe if not configured)
       - name: Emit risk events to Aurora
         env:
           AURORA_API_URL: ${{ secrets.AURORA_API_URL }}
@@ -99,13 +103,19 @@ jobs:
           python tools/emit_risk.py || echo "[emit_risk] skipping (no API configured)"
         continue-on-error: true
 
-      # 7) Create / refresh a PR with updated data (no direct push anywhere)
+      # ---- PR-based update (no direct push; avoids 403) ----
       - name: Create pull request with data updates
+        id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "[auto] Update data (Legislators/SALN/PNP/COA/PhilGEPS/COMELEC/Courts/DBM)"
           branch: data/auto-update
+          branch-suffix: timestamp            # avoids branch name collisions
+          delete-branch: true
+          signoff: true
+          committer: github-actions <actions@github.com>
+          author: github-actions <actions@github.com>
           title: "Automated data update"
           body: |
             This PR contains automated data updates produced by the Aurora pipeline.
@@ -115,10 +125,15 @@ jobs:
             data/**
             saln_meta/**
 
-      # 8) Minimal debug info if anything still errors
+      - name: PR URL
+        if: always()
+        run: |
+          echo "Pull Request: ${{ steps.cpr.outputs.pull-request-url || 'no changes (no PR created)' }}"
+
+      # Minimal debug if anything still fails
       - name: Session info on failure
         if: failure()
         run: |
           Rscript -e 'sessionInfo()' || true
-          echo "--- repo tree ---"
-          ls -R || true
+          echo "--- git remotes ---"; git remote -v || true
+          echo "--- repo tree ---"; ls -R || true
