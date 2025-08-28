@@ -4,49 +4,58 @@ library(dplyr)
 library(stringr)
 library(janitor)
 library(readr)
+library(tibble)
+
+safe_pick <- function(nm, choices) {
+  hit <- nm[nm %in% choices]
+  if (length(hit)) hit[1] else NA_character_
+}
 
 get_house_members <- function() {
   url <- "https://en.wikipedia.org/wiki/List_of_current_members_of_the_House_of_Representatives_of_the_Philippines"
   page <- read_html(url)
   tabs <- page |> html_nodes("table.wikitable")
-  if (length(tabs) == 0) stop("No House wikitable found.")
-  df <- tabs[[1]] |> html_table(fill = TRUE) |> clean_names()
+  if (length(tabs) == 0L) stop("No House wikitable found: ", url, call. = FALSE)
 
-  df |>
-    rename_with(~ str_replace_all(., "^district$", "district_info")) |>
-    mutate(
-      name           = str_squish(as.character(name)),
-      party          = if ("party" %in% names(.)) str_squish(as.character(party)) else NA_character_,
-      district_info  = if ("district_info" %in% names(.)) str_squish(as.character(district_info)) else NA_character_,
-      chamber        = "house",
-      source         = "wikipedia",
-      official_profile_url = NA_character_,
-      last_updated   = Sys.Date()
-    )
+  df <- tabs[[1]] |> html_table(fill = TRUE) |> clean_names()
+  nm <- names(df)
+
+  name_col  <- safe_pick(nm, c("name","representative","member","incumbent"))
+  party_col <- safe_pick(nm, c("party","political_party"))
+  dist_col  <- safe_pick(nm, c("district","district_info","constituency"))
+
+  tibble(
+    name          = str_squish(as.character(df[[name_col]])),
+    party         = if (!is.na(party_col))  str_squish(as.character(df[[party_col]])) else NA_character_,
+    district_info = if (!is.na(dist_col))   str_squish(as.character(df[[dist_col]]))  else NA_character_,
+    chamber       = "house",
+    source        = "wikipedia",
+    official_profile_url = NA_character_,
+    last_updated  = Sys.Date()
+  ) |> distinct()
 }
 
 get_senators <- function() {
   url <- "https://en.wikipedia.org/wiki/List_of_current_senators_of_the_Philippines"
   page <- read_html(url)
   tabs <- page |> html_nodes("table.wikitable")
-  if (length(tabs) == 0) stop("No Senate wikitable found.")
+  if (length(tabs) == 0L) stop("No Senate wikitable found: ", url, call. = FALSE)
+
   df <- tabs[[1]] |> html_table(fill = TRUE) |> clean_names()
-
   nm <- names(df)
-  name_col  <- nm[which(nm %in% c("senator","name"))[1]]
-  party_col <- nm[which(nm %in% c("party","political_party"))[1]]
 
-  df |>
-    rename(name = !!name_col, party = !!party_col) |>
-    mutate(
-      name           = str_squish(as.character(name)),
-      party          = str_squish(as.character(party)),
-      district_info  = NA_character_,
-      chamber        = "senate",
-      source         = "wikipedia",
-      official_profile_url = NA_character_,
-      last_updated   = Sys.Date()
-    )
+  name_col  <- safe_pick(nm, c("name","senator","member"))
+  party_col <- safe_pick(nm, c("party","political_party"))
+
+  tibble(
+    name          = str_squish(as.character(df[[name_col]])),
+    party         = if (!is.na(party_col)) str_squish(as.character(df[[party_col]])) else NA_character_,
+    district_info = NA_character_,
+    chamber       = "senate",
+    source        = "wikipedia",
+    official_profile_url = NA_character_,
+    last_updated  = Sys.Date()
+  ) |> distinct()
 }
 
 save_legislators <- function(df, path) {
@@ -61,5 +70,11 @@ main <- function() {
   save_legislators(house,  "data/philippines_house_members.csv")
   save_legislators(senate, "data/philippines_senators.csv")
 }
-
 main()
+      - name: Session info on failure
+        if: failure()
+        run: |
+          Rscript -e 'sessionInfo()'
+          echo "--- repo tree ---"
+          ls -R
+
