@@ -2,8 +2,8 @@ name: Aurora Pipeline – PR Data Updates
 
 on:
   schedule:
-    - cron: '0 1 * * *'   # daily at 01:00 UTC
-  workflow_dispatch:       # manual Run workflow button
+    - cron: '0 1 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,48 +12,35 @@ permissions:
 jobs:
   scrape-and-pr:
     runs-on: ubuntu-latest
-
     steps:
-      # Checkout code
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          persist-credentials: false   # disable default token
+          persist-credentials: false
           fetch-depth: 0
 
-      # Configure git (prevents exit 128/dubious ownership)
       - name: Configure git
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.email "actions@github.com"
           git config --global user.name "github-actions"
 
-      # Prep folders
       - name: Prepare folders
         run: |
           mkdir -p data/input data/coa data/procurement data/comelec data/courts data/dbm saln_meta tools
 
-      # R setup
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
 
-      - name: Install R dependencies
+      - name: Install R deps
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: |
-            any::rvest
-            any::dplyr
-            any::stringr
-            any::janitor
-            any::readr
-            any::purrr
-            any::jsonlite
-            any::digest
-            any::httr
-            any::lubridate
+            any::rvest any::dplyr any::stringr any::janitor
+            any::readr any::purrr any::jsonlite any::digest
+            any::httr any::lubridate
 
-      # Python setup
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -63,40 +50,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pydantic
 
-      # Run scrapers (best-effort, don’t fail whole job)
-      - name: Legislators
-        run: Rscript R/fetch_ph_legislators.R
+      # Run scrapers (best-effort)
+      - run: Rscript R/fetch_ph_legislators.R
+        name: Legislators
+        continue-on-error: true
+      - run: Rscript R/fetch_saln_metadata.R
+        name: SALN
+        continue-on-error: true
+      - run: Rscript R/fetch_pnp_data.R
+        name: PNP
+        continue-on-error: true
+      - run: Rscript R/coa_findings.R
+        name: COA
+        continue-on-error: true
+      - run: Rscript R/philgeps_awards.R
+        name: PhilGEPS
+        continue-on-error: true
+      - run: Rscript R/comelec_soce.R
+        name: COMELEC
+        continue-on-error: true
+      - run: Rscript R/court_cases.R
+        name: Courts
+        continue-on-error: true
+      - run: Rscript R/dbm_releases.R
+        name: DBM
         continue-on-error: true
 
-      - name: SALN metadata
-        run: Rscript R/fetch_saln_metadata.R
-        continue-on-error: true
-
-      - name: PNP
-        run: Rscript R/fetch_pnp_data.R
-        continue-on-error: true
-
-      - name: COA
-        run: Rscript R/coa_findings.R
-        continue-on-error: true
-
-      - name: PhilGEPS
-        run: Rscript R/philgeps_awards.R
-        continue-on-error: true
-
-      - name: COMELEC
-        run: Rscript R/comelec_soce.R
-        continue-on-error: true
-
-      - name: Courts
-        run: Rscript R/court_cases.R
-        continue-on-error: true
-
-      - name: DBM
-        run: Rscript R/dbm_releases.R
-        continue-on-error: true
-
-      # Risk events (skip if API not configured)
       - name: Emit risk events
         env:
           AURORA_API_URL: ${{ secrets.AURORA_API_URL }}
@@ -104,12 +83,11 @@ jobs:
         run: python tools/emit_risk.py || echo "[emit_risk] skipped"
         continue-on-error: true
 
-      # Always create/update PR (no git push)
-      - name: Create pull request with data updates
+      - name: Create PR with data updates
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "[auto] Update data (Legislators/SALN/PNP/COA/PhilGEPS/COMELEC/Courts/DBM)"
+          commit-message: "[auto] Update data (Aurora pipeline)"
           branch: data/auto-update
           branch-suffix: timestamp
           delete-branch: true
@@ -118,15 +96,14 @@ jobs:
           author: github-actions <actions@github.com>
           title: "Automated data update"
           body: |
-            This PR contains automated data updates produced by the Aurora pipeline.
-            Review diffs and merge when ready.
+            Automated data updates produced by the Aurora pipeline.
+            Review and merge to apply changes.
           labels: data-update, automated
           add-paths: |
             data/**
             saln_meta/**
 
-      # Debug info if failure
-      - name: Session info on failure
+      - name: Debug info on failure
         if: failure()
         run: |
           Rscript -e 'sessionInfo()' || true
