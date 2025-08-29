@@ -1,9 +1,9 @@
-name: Aurora Pipeline – PR-based Data Updates (Hardened)
+name: Aurora Pipeline – PR Data Updates
 
 on:
   schedule:
     - cron: '0 1 * * *'   # daily at 01:00 UTC
-  workflow_dispatch:
+  workflow_dispatch:       # manual Run workflow button
 
 permissions:
   contents: write
@@ -14,24 +14,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 0) Git + repo hygiene (prevents exit 128 from "dubious ownership")
+      # Checkout code
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          persist-credentials: false   # disable default token
           fetch-depth: 0
 
-      - name: Configure git for Actions
+      # Configure git (prevents exit 128/dubious ownership)
+      - name: Configure git
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.email "actions@github.com"
           git config --global user.name "github-actions"
 
+      # Prep folders
       - name: Prepare folders
         run: |
           mkdir -p data/input data/coa data/procurement data/comelec data/courts data/dbm saln_meta tools
 
-      # R runtime + deps
+      # R setup
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
 
@@ -50,7 +52,7 @@ jobs:
             any::httr
             any::lubridate
 
-      # Python for risk emitter
+      # Python setup
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -61,8 +63,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pydantic
 
-      # ---- Scrapers / normalizers (best-effort; don't kill the run) ----
-      - name: Legislators (House + Senate)
+      # Run scrapers (best-effort, don’t fail whole job)
+      - name: Legislators
         run: Rscript R/fetch_ph_legislators.R
         continue-on-error: true
 
@@ -74,44 +76,42 @@ jobs:
         run: Rscript R/fetch_pnp_data.R
         continue-on-error: true
 
-      - name: COA findings
+      - name: COA
         run: Rscript R/coa_findings.R
         continue-on-error: true
 
-      - name: PhilGEPS awards
+      - name: PhilGEPS
         run: Rscript R/philgeps_awards.R
         continue-on-error: true
 
-      - name: COMELEC SOCE
+      - name: COMELEC
         run: Rscript R/comelec_soce.R
         continue-on-error: true
 
-      - name: Courts (Ombudsman / SB / SC / CA)
+      - name: Courts
         run: Rscript R/court_cases.R
         continue-on-error: true
 
-      - name: DBM releases
+      - name: DBM
         run: Rscript R/dbm_releases.R
         continue-on-error: true
 
-      # Risk feed (safe if not configured)
-      - name: Emit risk events to Aurora
+      # Risk events (skip if API not configured)
+      - name: Emit risk events
         env:
           AURORA_API_URL: ${{ secrets.AURORA_API_URL }}
           AURORA_API_TOKEN: ${{ secrets.AURORA_API_TOKEN }}
-        run: |
-          python tools/emit_risk.py || echo "[emit_risk] skipping (no API configured)"
+        run: python tools/emit_risk.py || echo "[emit_risk] skipped"
         continue-on-error: true
 
-      # ---- PR-based update (no direct push; avoids 403) ----
+      # Always create/update PR (no git push)
       - name: Create pull request with data updates
-        id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "[auto] Update data (Legislators/SALN/PNP/COA/PhilGEPS/COMELEC/Courts/DBM)"
           branch: data/auto-update
-          branch-suffix: timestamp            # avoids branch name collisions
+          branch-suffix: timestamp
           delete-branch: true
           signoff: true
           committer: github-actions <actions@github.com>
@@ -125,15 +125,10 @@ jobs:
             data/**
             saln_meta/**
 
-      - name: PR URL
-        if: always()
-        run: |
-          echo "Pull Request: ${{ steps.cpr.outputs.pull-request-url || 'no changes (no PR created)' }}"
-
-      # Minimal debug if anything still fails
+      # Debug info if failure
       - name: Session info on failure
         if: failure()
         run: |
           Rscript -e 'sessionInfo()' || true
-          echo "--- git remotes ---"; git remote -v || true
-          echo "--- repo tree ---"; ls -R || true
+          git remote -v || true
+          ls -R || true
