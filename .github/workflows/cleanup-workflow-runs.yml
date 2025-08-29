@@ -1,0 +1,61 @@
+name: Cleanup Workflow Runs
+
+on:
+  workflow_dispatch:
+    inputs:
+      status:
+        description: Status to delete (failure, cancelled, success, completed, or all)
+        required: false
+        default: failure
+      branch:
+        description: Only delete runs for this branch (leave blank for all)
+        required: false
+        default: main
+      max_pages:
+        description: Pages of 100 runs to scan (safety cap)
+        required: false
+        default: "10"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete workflow runs
+        uses: actions/github-script@v7
+        with:
+          # If org policy blocks GITHUB_TOKEN, add a PAT secret named AURORA_PAT and swap the token line.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const status = core.getInput('status') || 'failure';
+            const branch = core.getInput('branch') || undefined;
+            const maxPages = parseInt(core.getInput('max_pages') || '10', 10);
+
+            let deleted = 0;
+            const per_page = 100;
+            for (let page = 1; page <= maxPages; page++) {
+              const params = { owner, repo, per_page, page };
+              if (branch && branch.trim().length) params.branch = branch;
+              if (status !== 'all') params.status = status;
+
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo(params);
+              const runs = data.workflow_runs;
+              if (!runs || runs.length === 0) break;
+
+              for (const run of runs) {
+                try {
+                  await github.rest.actions.deleteWorkflowRun({
+                    owner, repo, run_id: run.id
+                  });
+                  deleted++;
+                } catch (e) {
+                  core.warning(`Failed to delete run ${run.id} (${run.name}): ${e.message}`);
+                }
+              }
+            }
+            core.notice(`Deleted ${deleted} workflow runs.`);
