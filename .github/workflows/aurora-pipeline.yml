@@ -1,32 +1,5 @@
-name: Aurora Pipeline – PR Data Updates
-
-on:
-  schedule:
-    - cron: "0 * * * *"    # Runs every hour
-  workflow_dispatch:       # Allows manual triggering
-
-jobs:
-  aurora_pipeline:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up R
-        uses: r-lib/actions/setup-r@v2
-
-      - name: Install R Dependencies
-        run: |
-          Rscript -e 'install.packages(c("httr", "jsonlite", "rvest", "dplyr"))'
-
-      - name: Run Scraper
-        run: |
-          Rscript R/scrape_all.R
-
-      - name: Notify Aurora Backend
-        run: |
-          curl -X POST https://your-backend-url/ops/aurora/dispatch \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.AURORA_API_KEY }}" \
-            -d '{"branch": "main"}'
+- name: Trigger Aurora Backend (via ngrok)
+  run: |
+    curl -X POST https://a4d89c2af3d5.ngrok-free.app/ops/aurora/dispatch \
+      -H "Content-Type: application/json" \
+      -d '{"branch": "main"}'
