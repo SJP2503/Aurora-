@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       status:
-        description: Status to delete (failure, cancelled, success, completed, or all)
-        required: false
+        description: Status to delete (failure|cancelled|success|completed|all)
         default: failure
       branch:
-        description: Only delete runs for this branch (leave blank for all)
-        required: false
+        description: Only delete runs for this branch
         default: main
       max_pages:
-        description: Pages of 100 runs to scan (safety cap)
-        required: false
+        description: Pages of 100 runs to scan
         default: "10"
+      min_age_days:
+        description: Only delete runs older than this many days
+        default: "7"
 
 permissions:
   actions: write
@@ -27,35 +27,65 @@ jobs:
       - name: Delete workflow runs
         uses: actions/github-script@v7
         with:
-          # If org policy blocks GITHUB_TOKEN, add a PAT secret named AURORA_PAT and swap the token line.
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }} # or secrets.AURORA_PAT
           script: |
+            const status     = core.getInput('status') || 'failure';
+            const branch     = core.getInput('branch') || undefined;
+            const maxPages   = parseInt(core.getInput('max_pages') || '10', 10);
+            const minAgeDays = parseInt(core.getInput('min_age_days') || '7', 10);
+
             const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const status = core.getInput('status') || 'failure';
-            const branch = core.getInput('branch') || undefined;
-            const maxPages = parseInt(core.getInput('max_pages') || '10', 10);
+            const repo  = context.repo.repo;
+
+            const msPerDay = 24*60*60*1000;
+            const cutoff   = Date.now() - (minAgeDays * msPerDay);
 
             let deleted = 0;
+            let keptLatestPerWorkflow = new Set();
+
             const per_page = 100;
             for (let page = 1; page <= maxPages; page++) {
               const params = { owner, repo, per_page, page };
-              if (branch && branch.trim().length) params.branch = branch;
+              if (branch && branch.trim()) params.branch = branch;
               if (status !== 'all') params.status = status;
 
               const { data } = await github.rest.actions.listWorkflowRunsForRepo(params);
-              const runs = data.workflow_runs;
-              if (!runs || runs.length === 0) break;
+              const runs = data.workflow_runs || [];
+              if (runs.length === 0) break;
 
               for (const run of runs) {
+                // Skip if too new
+                const createdAt = new Date(run.created_at).getTime();
+                if (createdAt > cutoff) {
+                  core.info(`Skip (too recent): ${run.name} #${run.id}`);
+                  continue;
+                }
+
+                // Protect the latest successful per workflow_id
+                const wfKey = `${run.workflow_id}`;
+                if (!keptLatestPerWorkflow.has(wfKey)) {
+                  // Keep the first SUCCESS we encounter per workflow to ensure at least one recent keepsake
+                  if (run.conclusion === 'success') {
+                    keptLatestPerWorkflow.add(wfKey);
+                    core.info(`Keep latest success for workflow ${wfKey}: run ${run.id}`);
+                    continue;
+                  }
+                }
+
+                // Do not delete in-progress runs
+                if (run.status && ['queued', 'in_progress', 'requested'].includes(run.status)) {
+                  core.info(`Skip (in progress): ${run.name} #${run.id}`);
+                  continue;
+                }
+
                 try {
-                  await github.rest.actions.deleteWorkflowRun({
-                    owner, repo, run_id: run.id
-                  });
+                  await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
                   deleted++;
+                  core.info(`Deleted: ${run.name} #${run.id} (${run.conclusion})`);
                 } catch (e) {
                   core.warning(`Failed to delete run ${run.id} (${run.name}): ${e.message}`);
                 }
               }
             }
-            core.notice(`Deleted ${deleted} workflow runs.`);
+
+            core.notice(`Deleted ${deleted} workflow runs (status=${status}, branch=${branch || 'all'}, older_than=${minAgeDays}d).`);
