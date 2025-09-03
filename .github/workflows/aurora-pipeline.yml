@@ -1,23 +1,62 @@
-name: Aurora Pipeline – PR Data Updates
+name: Aurora – Build & Publish Officials Master
 
 on:
   schedule:
-    - cron: "0 1 * * *"   # Daily at 9:00 AM PHT (1:00 AM UTC)
-  workflow_dispatch:       # Enables manual run from GitHub
+    - cron: "0 1 * * *"      # Daily at 09:00 PHT (01:00 UTC)
+  workflow_dispatch: {}       # Manual trigger
+
+permissions:
+  contents: write
 
 jobs:
-  aurora_pipeline:
+  build-master:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up R
-        uses: r-lib/actions/setup-r@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Trigger Aurora Backend (via ngrok)
+      - name: Install Python deps
         run: |
-          curl -X POST https://a4d89c2af3d5.ngrok-free.app/ops/aurora/dispatch \
-            -H "Content-Type: application/json" \
-            -d '{"branch": "main"}'
+          python -m pip install --upgrade pip
+          pip install pandas openpyxl beautifulsoup4 requests thefuzz[speedup]
+
+      # If you also build from FINAL-LCE workbook each run, add the file to repo or fetch it here
+      # - name: Download latest DILG workbook (optional)
+      #   run: curl -L -o data/FINAL-LIST-OF-LCEs-WITH-SANGGUNIAN-MEMBERS-TERM-2025-2028.xlsx "<YOUR_SOURCE_URL>"
+
+      - name: Rebuild officials master (Excel + CSV)
+        run: |
+          python merge_lce_final.py
+
+      - name: Validate master Excel
+        run: |
+          python - <<'EOF'
+          import pandas as pd
+          df = pd.read_excel("data/officials_master_updated.xlsx")
+          assert "name" in df.columns, "Missing 'name' column"
+          assert len(df) > 0, "Excel is empty"
+          print("OK:", len(df), "rows")
+          EOF
+
+      - name: Commit updated master
+        run: |
+          git config user.name "Aurora Bot"
+          git config user.email "aurora-bot@example.com"
+          git add data/officials_master_updated.xlsx data/officials_master_updated.csv || true
+          git commit -m "Update officials master list [auto]" || echo "No changes"
+          git push
+
+      - name: Upload artifacts (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: officials-master
+          path: |
+            data/officials_master_updated.xlsx
+            data/officials_master_updated.csv
