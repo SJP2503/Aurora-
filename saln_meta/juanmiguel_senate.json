@@ -1,9 +1,9 @@
 {
-  "saln_id": "ramonguicojr_house",
-  "name": "Ramon Guico Jr.",
-  "chamber": "house",
+  "saln_id": "juanmiguel_senate",
+  "name": "Juan Miguel",
+  "chamber": "senate",
   "party": null,
-  "district": "Pangasinan–5th",
+  "district": null,
   "official_profile_url": null,
   "saln_status": "unknown",
   "saln_last_checked": "2025-09-09",
