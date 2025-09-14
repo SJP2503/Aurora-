@@ -1,9 +1,9 @@
 {
-  "saln_id": "gervilleluistro_house",
-  "name": "Gerville Luistro",
-  "chamber": "house",
+  "saln_id": "juanmiguelzubiri_senate",
+  "name": "Juan Miguel Zubiri",
+  "chamber": "senate",
   "party": null,
-  "district": "Batangas–2nd",
+  "district": null,
   "official_profile_url": null,
   "saln_status": "unknown",
   "saln_last_checked": "2025-09-14",
