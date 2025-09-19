@@ -1,9 +1,9 @@
 {
-  "saln_id": "emmanueliway_house",
-  "name": "Emmanuel Iway",
+  "saln_id": "electiondisputedd_house",
+  "name": "Election disputed[d]",
   "chamber": "house",
-  "party": null,
-  "district": "Negros Oriental–1st",
+  "party": "Election disputed[d]",
+  "district": "Party-list",
   "official_profile_url": null,
   "saln_status": "unknown",
   "saln_last_checked": "2025-09-19",
