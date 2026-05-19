@@ -2,10 +2,10 @@
   "saln_id": "vacant_house",
   "name": "Vacant",
   "chamber": "house",
-  "party": "TBD",
-  "district": "Antipolo–2nd",
+  "party": null,
+  "district": "Party-list",
   "official_profile_url": null,
   "saln_status": "unknown",
-  "saln_last_checked": "2026-03-16",
+  "saln_last_checked": "2026-05-19",
   "saln_notes": null
 }
