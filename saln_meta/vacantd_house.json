@@ -1,9 +1,9 @@
 {
-  "saln_id": "josephtan_house",
-  "name": "Joseph Tan",
+  "saln_id": "vacantd_house",
+  "name": "Vacant[d]",
   "chamber": "house",
-  "party": null,
-  "district": "Isabela–4th",
+  "party": "Vacant[d]",
+  "district": "Batanes at-large",
   "official_profile_url": null,
   "saln_status": "unknown",
   "saln_last_checked": "2026-09-22",
